@@ -82,8 +82,25 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
       sessionRef.current.startAt = new Date();
       sessionRef.current.bpmSamples = [];
 
+      const captureSize =
+        settings.resolution === '1080p'
+          ? { width: 1920, height: 1080 }
+          : settings.resolution === '720p'
+            ? { width: 1280, height: 720 }
+            : { width: 640, height: 480 };
+
+      const sendWidth = Math.min(640, captureSize.width);
+      const sendHeight = Math.max(1, Math.round((sendWidth * captureSize.height) / captureSize.width));
+
       // 1. Start Camera
-      navigator.mediaDevices.getUserMedia({ video: true })
+      navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: captureSize.width },
+          height: { ideal: captureSize.height },
+          frameRate: { ideal: 30 },
+        },
+        audio: false,
+      })
         .then(stream => {
           if (!isMounted) {
             // If component unmounted or monitoring stopped before promise resolved
@@ -118,9 +135,9 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
               if (videoRef.current && canvasRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
                   const ctx = canvasRef.current.getContext('2d');
                   if (ctx) {
-                      canvasRef.current.width = 640; // Resize for performance
-                      canvasRef.current.height = 480;
-                      ctx.drawImage(videoRef.current, 0, 0, 640, 480);
+                      canvasRef.current.width = sendWidth;
+                      canvasRef.current.height = sendHeight;
+                      ctx.drawImage(videoRef.current, 0, 0, sendWidth, sendHeight);
                       canvasRef.current.toBlob(blob => {
                           if (blob && wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(blob);
                       }, 'image/jpeg', 0.8);
@@ -193,7 +210,7 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
          videoRef.current.srcObject = null;
       }
     };
-  }, [isMonitoring]);
+  }, [isMonitoring, settings.cameraSource, settings.esp32Address, settings.resolution]);
 
   const toggleFullScreen = () => {
     if (videoRef.current) {

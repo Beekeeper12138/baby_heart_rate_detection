@@ -107,6 +107,14 @@ class RPPGService:
         if frame is None:
             return None
 
+        h, w = frame.shape[:2]
+        max_w = 640
+        if w > max_w:
+            scale = max_w / float(w)
+            new_w = max_w
+            new_h = max(1, int(h * scale))
+            frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
         now = time.time()
         if self._last_frame_ts is not None:
             dt = now - self._last_frame_ts
