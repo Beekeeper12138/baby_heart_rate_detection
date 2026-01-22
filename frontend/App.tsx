@@ -4,8 +4,10 @@ import Dashboard from './pages/Dashboard';
 import History from './pages/History';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import Report from './pages/Report';
 import { getTranslation } from './utils/i18n';
 import { api } from './services/api';
+import { ReportData } from './types';
 
 // Default Settings
 const DEFAULT_SETTINGS: AppSettings = {
@@ -27,6 +29,7 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(accessToken ? 'dashboard' : 'login');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [backendAvailable, setBackendAvailable] = useState(true);
+  const [reportData, setReportData] = useState<ReportData | null>(null);
   const t = getTranslation(settings.language).nav;
 
   // Apply Theme and Listen for System Changes
@@ -124,13 +127,35 @@ const App: React.FC = () => {
           />
         );
       case 'dashboard':
-        return accessToken ? <Dashboard settings={settings} token={accessToken} /> : null;
+        return accessToken ? (
+          <Dashboard
+            settings={settings}
+            token={accessToken}
+            onUpdateSettings={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
+            onOpenReport={(data) => {
+              setReportData(data);
+              setCurrentView('report');
+            }}
+          />
+        ) : null;
       case 'history':
         return accessToken ? <History settings={settings} token={accessToken} /> : null;
       case 'settings':
         return <Settings settings={settings} onSave={setSettings} />;
+      case 'report':
+        return reportData ? <Report settings={settings} report={reportData} onBack={() => setCurrentView('dashboard')} /> : null;
       default:
-        return accessToken ? <Dashboard settings={settings} token={accessToken} /> : null;
+        return accessToken ? (
+          <Dashboard
+            settings={settings}
+            token={accessToken}
+            onUpdateSettings={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
+            onOpenReport={(data) => {
+              setReportData(data);
+              setCurrentView('report');
+            }}
+          />
+        ) : null;
     }
   };
 

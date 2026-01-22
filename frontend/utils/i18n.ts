@@ -99,6 +99,28 @@ export const translations = {
       createAccount: "创建账户并登录",
       submitting: "提交中...",
       unknownError: "请求失败，请稍后重试"
+    },
+    report: {
+      title: "监测数据报告",
+      subtitle: "",
+      back: "返回",
+      exportPdf: "导出 PDF",
+      generatedAt: "生成时间",
+      startTime: "开始时间",
+      endTime: "结束时间",
+      avgBpm: "平均心率",
+      minMaxBpm: "最小/最大心率",
+      signalQuality: "信号质量",
+      thresholds: "报警阈值",
+      sampleCount: "样本数",
+      snapshot: "实时快照",
+      metric: "指标",
+      value: "值",
+      currentBpm: "当前心率",
+      spo2: "SpO₂（估值）",
+      respRate: "呼吸频率",
+      lighting: "光照一致性",
+      printHint: ""
     }
   },
   'en-US': {
@@ -201,6 +223,28 @@ export const translations = {
       createAccount: "Create Account & Sign In",
       submitting: "Submitting...",
       unknownError: "Request failed, please try again"
+    },
+    report: {
+      title: "Monitoring Report",
+      subtitle: "",
+      back: "Back",
+      exportPdf: "Export PDF",
+      generatedAt: "Generated At",
+      startTime: "Start Time",
+      endTime: "End Time",
+      avgBpm: "Avg BPM",
+      minMaxBpm: "Min/Max BPM",
+      signalQuality: "Signal Quality",
+      thresholds: "Thresholds",
+      sampleCount: "Samples",
+      snapshot: "Realtime Snapshot",
+      metric: "Metric",
+      value: "Value",
+      currentBpm: "Current BPM",
+      spo2: "SpO2 (Est)",
+      respRate: "Resp Rate",
+      lighting: "Lighting Consistency",
+      printHint: ""
     }
   }
 };

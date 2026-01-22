@@ -1,4 +1,26 @@
-export type ViewState = 'login' | 'dashboard' | 'history' | 'settings';
+export type ViewState = 'login' | 'dashboard' | 'history' | 'settings' | 'report';
+
+export type ReportSnapshot = {
+  currentBpm: number;
+  spo2: number;
+  respRate: number;
+  snr: number;
+  lighting: number;
+  signalQuality: string;
+};
+
+export type ReportData = {
+  createdAt: number;
+  startAt: number | null;
+  endAt: number;
+  avgBpm: number;
+  minBpm: number;
+  maxBpm: number;
+  sampleCount: number;
+  thresholdMin: number;
+  thresholdMax: number;
+  snapshot: ReportSnapshot;
+};
 
 export interface VitalSign {
   value: number;

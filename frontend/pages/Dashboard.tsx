@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Waveform } from '../components/Waveform';
-import { AppSettings } from '../types';
+import { AppSettings, ReportData } from '../types';
 import { getTranslation } from '../utils/i18n';
 import { api } from '../services/api';
 
 interface DashboardProps {
   settings: AppSettings;
   token: string;
+  onUpdateSettings?: (patch: Partial<AppSettings>) => void;
+  onOpenReport?: (report: ReportData) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
+const Dashboard: React.FC<DashboardProps> = ({ settings, token, onUpdateSettings, onOpenReport }) => {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [bpm, setBpm] = useState(0);
   const [spo2, setSpo2] = useState(0);
@@ -18,6 +20,9 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
   const [snr, setSnr] = useState(0);
   const [lighting, setLighting] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [thresholdOpen, setThresholdOpen] = useState(false);
+  const [minHrDraft, setMinHrDraft] = useState(settings.minHR);
+  const [maxHrDraft, setMaxHrDraft] = useState(settings.maxHR);
   const t = getTranslation(settings.language).dashboard;
   
   const videoRef = React.useRef<HTMLVideoElement>(null);
@@ -36,6 +41,12 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
     if (valid.length === 0) return 0;
     const sum = valid.reduce((a, b) => a + b, 0);
     return sum / valid.length;
+  };
+
+  const calcMinMax = (samples: number[]) => {
+    const valid = samples.filter((x) => Number.isFinite(x) && x > 0);
+    if (valid.length === 0) return { min: 0, max: 0 };
+    return { min: Math.min(...valid), max: Math.max(...valid) };
   };
 
   const handleSave = async () => {
@@ -72,6 +83,50 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
       setIsSaving(false);
     }
   };
+
+  const generateReport = () => {
+    const startAt = sessionRef.current.startAt;
+    if (!startAt) {
+      window.alert(settings.language === 'zh-CN' ? '请先开始监测后再生成报告' : 'Start monitoring before generating a report');
+      return;
+    }
+    const endAt = new Date();
+    const samples = sessionRef.current.bpmSamples;
+    const avg = calcAvgBpm(samples);
+    const mm = calcMinMax(samples);
+
+    if (!onOpenReport) {
+      window.alert(settings.language === 'zh-CN' ? '当前版本不支持打开报告页' : 'Report view is not available');
+      return;
+    }
+
+    const report: ReportData = {
+      createdAt: Date.now(),
+      startAt: startAt ? startAt.getTime() : null,
+      endAt: endAt.getTime(),
+      avgBpm: Number.isFinite(avg) ? Math.round(avg * 10) / 10 : 0,
+      minBpm: mm.min,
+      maxBpm: mm.max,
+      sampleCount: samples.length,
+      thresholdMin: settings.minHR,
+      thresholdMax: settings.maxHR,
+      snapshot: {
+        currentBpm: bpm,
+        spo2,
+        respRate,
+        snr,
+        lighting,
+        signalQuality,
+      },
+    };
+
+    onOpenReport(report);
+  };
+
+  useEffect(() => {
+    setMinHrDraft(settings.minHR);
+    setMaxHrDraft(settings.maxHR);
+  }, [settings.minHR, settings.maxHR]);
 
   // Start/Stop Monitoring
   useEffect(() => {
@@ -225,6 +280,7 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
   };
 
   return (
+    <>
     <div className="p-4 md:p-8 space-y-6 pb-20">
       {/* Hidden Canvas for Frame Processing */}
       <canvas ref={canvasRef} className="hidden" />
@@ -367,9 +423,9 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
             
             <div className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs sm:text-sm font-bold z-10 transition-colors ${bpm > 100 && bpm < 160 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'}`}>
               <span className="material-symbols-outlined text-xs sm:text-base">
-                  {bpm > 100 && bpm < 160 ? 'check_circle' : 'warning'}
+                  {bpm > settings.minHR && bpm < settings.maxHR ? 'check_circle' : 'warning'}
               </span>
-              <span>{bpm > 100 && bpm < 160 ? t.normalRange : t.abnormal}</span>
+              <span>{bpm > settings.minHR && bpm < settings.maxHR ? t.normalRange : t.abnormal}</span>
             </div>
           </div>
 
@@ -435,7 +491,11 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
 
           {/* Quick Actions */}
           <div className="grid grid-cols-1 gap-2 sm:gap-3">
-             <button className="w-full flex items-center justify-between p-3 sm:p-4 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary-dark transition-all group">
+             <button
+               className="w-full flex items-center justify-between p-3 sm:p-4 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary-dark transition-all group"
+               onClick={generateReport}
+               type="button"
+             >
                 <div className="flex items-center gap-2 sm:gap-3">
                   <span className="bg-white/20 p-1.5 sm:p-2 rounded-lg">
                     <span className="material-symbols-outlined text-sm sm:text-xl">analytics</span>
@@ -448,14 +508,18 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
                 <span className="material-symbols-outlined text-sm sm:text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
               </button>
               
-              <button className="w-full flex items-center justify-between p-3 sm:p-4 bg-white dark:bg-card-dark border border-gray-200 dark:border-slate-800 rounded-xl font-bold text-[#121517] dark:text-white hover:bg-gray-50 dark:hover:bg-slate-800 transition-all group">
+              <button
+                className="w-full flex items-center justify-between p-3 sm:p-4 bg-white dark:bg-card-dark border border-gray-200 dark:border-slate-800 rounded-xl font-bold text-[#121517] dark:text-white hover:bg-gray-50 dark:hover:bg-slate-800 transition-all group"
+                onClick={() => setThresholdOpen(true)}
+                type="button"
+              >
                 <div className="flex items-center gap-2 sm:gap-3">
                    <span className="bg-gray-100 dark:bg-slate-800 p-1.5 sm:p-2 rounded-lg text-gray-500">
                       <span className="material-symbols-outlined text-sm sm:text-xl">notifications_active</span>
                    </span>
                    <div className="text-left">
                     <span className="block text-xs sm:text-sm">{t.thresholds}</span>
-                    <span className="block text-[9px] sm:text-[10px] text-gray-500 font-normal">{t.current}: 60-220 BPM</span>
+                    <span className="block text-[9px] sm:text-[10px] text-gray-500 font-normal">{t.current}: {settings.minHR}-{settings.maxHR} BPM</span>
                   </div>
                 </div>
                 <span className="material-symbols-outlined text-sm sm:text-base text-gray-400 group-hover:text-primary transition-colors">settings</span>
@@ -464,6 +528,77 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token }) => {
         </div>
       </div>
     </div>
+    {thresholdOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+        <button className="absolute inset-0 bg-black/40" onClick={() => setThresholdOpen(false)} type="button" />
+        <div className="relative w-full max-w-md bg-white dark:bg-card-dark border border-[#dce1e5] dark:border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+          <div className="p-4 border-b border-[#dce1e5] dark:border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary">notifications_active</span>
+              <h3 className="font-black text-[#121517] dark:text-white">{t.thresholds}</h3>
+            </div>
+            <button
+              className="px-3 h-9 rounded-lg bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors text-sm font-bold"
+              onClick={() => setThresholdOpen(false)}
+              type="button"
+            >
+              {getTranslation(settings.language).history.close}
+            </button>
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-600 dark:text-gray-300">{getTranslation(settings.language).settings.minHr}</label>
+                <input
+                  className="w-full px-4 h-11 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent dark:text-white"
+                  type="number"
+                  value={minHrDraft}
+                  onChange={(e) => setMinHrDraft(Number(e.currentTarget.value))}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-600 dark:text-gray-300">{getTranslation(settings.language).settings.maxHr}</label>
+                <input
+                  className="w-full px-4 h-11 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent dark:text-white"
+                  type="number"
+                  value={maxHrDraft}
+                  onChange={(e) => setMaxHrDraft(Number(e.currentTarget.value))}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                className="px-4 h-10 rounded-lg bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors text-sm font-bold"
+                onClick={() => {
+                  setMinHrDraft(settings.minHR);
+                  setMaxHrDraft(settings.maxHR);
+                  setThresholdOpen(false);
+                }}
+                type="button"
+              >
+                {getTranslation(settings.language).settings.restore}
+              </button>
+              <button
+                className="px-4 h-10 rounded-lg bg-primary text-white font-black hover:bg-primary-dark transition-colors shadow-sm disabled:opacity-60"
+                disabled={!Number.isFinite(minHrDraft) || !Number.isFinite(maxHrDraft) || minHrDraft <= 0 || maxHrDraft <= 0 || minHrDraft >= maxHrDraft || !onUpdateSettings}
+                onClick={() => {
+                  if (!onUpdateSettings) return;
+                  if (!Number.isFinite(minHrDraft) || !Number.isFinite(maxHrDraft)) return;
+                  if (minHrDraft <= 0 || maxHrDraft <= 0) return;
+                  if (minHrDraft >= maxHrDraft) return;
+                  onUpdateSettings({ minHR: Math.round(minHrDraft), maxHR: Math.round(maxHrDraft) });
+                  setThresholdOpen(false);
+                }}
+                type="button"
+              >
+                {getTranslation(settings.language).settings.save}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 
