@@ -1,0 +1,7 @@
+{
+  "name": "InfantMonitor",
+  "description": "A real-time rPPG-based infant heart rate monitoring system.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
