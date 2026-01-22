@@ -39,6 +39,42 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
+@router.put("/me", response_model=schemas.User)
+def update_users_me(
+    payload: schemas.UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if payload.username is not None and payload.username != current_user.username:
+        existing = db.query(models.User).filter(models.User.username == payload.username).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Username already registered")
+        current_user.username = payload.username
+
+    if payload.full_name is not None:
+        current_user.full_name = payload.full_name
+
+    if payload.avatar_url is not None:
+        current_user.avatar_url = payload.avatar_url
+
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+@router.put("/password")
+def change_password(
+    payload: schemas.PasswordChange,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if not security.verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password")
+    current_user.hashed_password = security.get_password_hash(payload.new_password)
+    db.add(current_user)
+    db.commit()
+    return {"ok": True}
+
 @router.post("/logout")
 def logout():
     return {"ok": True}

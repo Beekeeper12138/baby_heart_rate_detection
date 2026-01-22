@@ -14,9 +14,19 @@ class TokenData(BaseModel):
 class UserBase(BaseModel):
     username: str = Field(min_length=2, max_length=32, pattern=r"^[\w]+$")
     full_name: Optional[str] = Field(default=None, max_length=100)
+    avatar_url: Optional[str] = Field(default=None, max_length=500000)
 
 class UserCreate(UserBase):
     password: str = Field(min_length=8, max_length=128)
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = Field(default=None, min_length=2, max_length=32, pattern=r"^[\w]+$")
+    full_name: Optional[str] = Field(default=None, max_length=100)
+    avatar_url: Optional[str] = Field(default=None, max_length=500000)
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 class User(UserBase):
     id: int

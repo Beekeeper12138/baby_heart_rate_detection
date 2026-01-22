@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 const App: React.FC = () => {
   const [accessToken, setAccessToken] = useState<string | null>(api.getStoredToken());
-  const [currentUser, setCurrentUser] = useState<{ id: number; username: string; full_name?: string | null } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ id: number; username: string; full_name?: string | null; avatar_url?: string | null } | null>(null);
   const [currentView, setCurrentView] = useState<ViewState>(accessToken ? 'dashboard' : 'login');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [backendAvailable, setBackendAvailable] = useState(true);
@@ -141,7 +141,7 @@ const App: React.FC = () => {
       case 'history':
         return accessToken ? <History settings={settings} token={accessToken} /> : null;
       case 'settings':
-        return <Settings settings={settings} onSave={setSettings} />;
+        return <Settings settings={settings} onSave={setSettings} token={accessToken ?? undefined} currentUser={currentUser} onUpdateUser={setCurrentUser} />;
       case 'report':
         return reportData ? <Report settings={settings} report={reportData} onBack={() => setCurrentView('dashboard')} /> : null;
       default:
@@ -252,7 +252,7 @@ const App: React.FC = () => {
                 )}
                 <div 
                   className="size-9 rounded-full bg-cover bg-center border-2 border-gray-200 dark:border-gray-700 cursor-pointer"
-                  style={{ backgroundImage: 'url(\"https://picsum.photos/100/100\")' }}
+                  style={{ backgroundImage: `url("${currentUser?.avatar_url || 'https://picsum.photos/100/100'}")` }}
                 ></div>
               </div>
             </div>

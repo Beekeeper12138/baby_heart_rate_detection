@@ -1,16 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { AppSettings, ThemeMode } from '../types';
 import { getTranslation } from '../utils/i18n';
+import { api } from '../services/api';
 
 interface SettingsProps {
   settings: AppSettings;
   onSave: (newSettings: AppSettings) => void;
+  token?: string;
+  currentUser?: { id: number; username: string; full_name?: string | null; avatar_url?: string | null } | null;
+  onUpdateUser?: (u: { id: number; username: string; full_name?: string | null; avatar_url?: string | null } | null) => void;
 }
 
 const RECOMMENDED_RPPG_SENSITIVITY = 75;
 const RECOMMENDED_MOTION_REJECTION = 40;
+const MAX_AVATAR_BYTES = 200 * 1024;
 
-const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
+const Settings: React.FC<SettingsProps> = ({ settings, onSave, token, currentUser, onUpdateUser }) => {
   const [localSettings, setLocalSettings] = React.useState<AppSettings>(settings);
   const [hasChanges, setHasChanges] = React.useState(false);
   const t = getTranslation(localSettings.language).settings;
@@ -75,6 +80,17 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
   };
 
   const [activeSection, setActiveSection] = useState('camera');
+  const [profileUsername, setProfileUsername] = useState('');
+  const [profileNickname, setProfileNickname] = useState('');
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [profileNotice, setProfileNotice] = useState<string | null>(null);
+  const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
+  const avatarFileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleReset = () => {
       setLocalSettings(settings);
@@ -89,6 +105,83 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
       element.scrollIntoView({ behavior: 'smooth' });
     }
   }
+
+  useEffect(() => {
+    setProfileNotice(null);
+    setPasswordNotice(null);
+  }, [localSettings.language]);
+
+  useEffect(() => {
+    setProfileUsername(currentUser?.username ?? '');
+    setProfileNickname(currentUser?.full_name ?? '');
+    setProfileAvatarUrl(currentUser?.avatar_url ?? '');
+  }, [currentUser?.id, currentUser?.username, currentUser?.full_name, currentUser?.avatar_url]);
+
+  const saveProfile = async () => {
+    if (!token) return;
+    if (profileSaving) return;
+    setProfileNotice(null);
+    setProfileSaving(true);
+    try {
+      const updated = await api.updateProfile(token, {
+        username: profileUsername || undefined,
+        full_name: profileNickname || null,
+        avatar_url: profileAvatarUrl || null,
+      });
+      onUpdateUser?.(updated as any);
+      setProfileNotice(t.savedOk);
+    } catch (e: any) {
+      setProfileNotice(e?.message || (localSettings.language === 'zh-CN' ? '保存失败' : 'Save failed'));
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const pickAvatar = () => {
+    avatarFileInputRef.current?.click();
+  };
+
+  const onAvatarFileChange = async (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setProfileNotice(t.avatarInvalid);
+      return;
+    }
+    if (file.size > MAX_AVATAR_BYTES) {
+      setProfileNotice(t.avatarTooLarge);
+      return;
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('read_error'));
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.readAsDataURL(file);
+    });
+    setProfileAvatarUrl(dataUrl);
+    setProfileNotice(null);
+  };
+
+  const changePassword = async () => {
+    if (!token) return;
+    if (passwordSaving) return;
+    setPasswordNotice(null);
+    if (newPassword !== confirmPassword) {
+      setPasswordNotice(t.passwordMismatch);
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await api.changePassword(token, { current_password: currentPassword, new_password: newPassword });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordNotice(t.passwordOk);
+    } catch (e: any) {
+      setPasswordNotice(e?.message || (localSettings.language === 'zh-CN' ? '更新失败' : 'Update failed'));
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
 
   useEffect(() => {
     const stopLocalStream = () => {
@@ -210,7 +303,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                         className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeSection === section ? 'bg-primary text-white shadow-md shadow-primary/20' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                     >
                          <span className="material-symbols-outlined text-[24px]">
-                            {section === 'camera' ? 'videocam' : section === 'signal' ? 'monitoring' : section === 'appearance' ? 'palette' : 'security'}
+                            {section === 'camera' ? 'videocam' : section === 'signal' ? 'monitoring' : section === 'appearance' ? 'palette' : 'person'}
                          </span>
                          <span className="text-sm font-semibold capitalize">
                              {section === 'camera' ? t.camera : section === 'signal' ? t.signal : section === 'appearance' ? t.appearance : t.security}
@@ -437,6 +530,156 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                             </select>
                          </div>
                      </div>
+                </div>
+            </section>
+
+            <section id="security" className="bg-white dark:bg-card-dark rounded-2xl border border-gray-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                <div className="px-6 py-4 border-b border-gray-100 dark:border-slate-700 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary">person</span>
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">{t.security}</h3>
+                </div>
+                <div className="p-6 flex flex-col gap-8">
+                    {!token && (
+                      <div className="px-4 py-3 rounded-xl bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm font-bold">
+                        {localSettings.language === 'zh-CN' ? '请先登录后再修改个人信息' : 'Please sign in to edit profile'}
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-black text-gray-900 dark:text-white">{t.account}</p>
+                        </div>
+                        {profileNotice && (
+                          <span className="text-xs font-bold text-gray-600 dark:text-gray-300">{profileNotice}</span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="flex flex-col gap-2">
+                          <label className="text-sm font-semibold text-gray-900 dark:text-white">{t.username2}</label>
+                          <input
+                            type="text"
+                            value={profileUsername}
+                            onChange={(e) => setProfileUsername(e.target.value)}
+                            disabled={!token}
+                            className="rounded-xl border-gray-200 dark:border-slate-600 dark:bg-slate-800 dark:text-white h-12 px-4 disabled:opacity-60"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-sm font-semibold text-gray-900 dark:text-white">{t.nickname}</label>
+                          <input
+                            type="text"
+                            value={profileNickname}
+                            onChange={(e) => setProfileNickname(e.target.value)}
+                            disabled={!token}
+                            className="rounded-xl border-gray-200 dark:border-slate-600 dark:bg-slate-800 dark:text-white h-12 px-4 disabled:opacity-60"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-3">
+                        <label className="text-sm font-semibold text-gray-900 dark:text-white">{t.avatar}</label>
+                        <div className="flex items-center gap-4">
+                          <div
+                            className="size-14 rounded-full bg-cover bg-center border-2 border-gray-200 dark:border-slate-700"
+                            style={{ backgroundImage: `url("${profileAvatarUrl || 'https://picsum.photos/100/100'}")` }}
+                          />
+                          <div className="flex-1 flex flex-col gap-2">
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={profileAvatarUrl}
+                                onChange={(e) => setProfileAvatarUrl(e.target.value)}
+                                disabled={!token}
+                                placeholder={t.avatarUrl}
+                                className="flex-1 rounded-xl border-gray-200 dark:border-slate-600 dark:bg-slate-800 dark:text-white h-12 px-4 disabled:opacity-60"
+                              />
+                              <button
+                                onClick={pickAvatar}
+                                disabled={!token}
+                                className="h-12 px-4 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white font-bold hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-60"
+                                type="button"
+                              >
+                                {t.avatarPick}
+                              </button>
+                              <input
+                                ref={avatarFileInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => onAvatarFileChange(e.target.files?.[0] ?? null)}
+                              />
+                            </div>
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                              {localSettings.language === 'zh-CN' ? '可粘贴图片链接，或选择图片生成内嵌头像' : 'Paste an image URL or pick an image'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button
+                          onClick={saveProfile}
+                          disabled={!token || profileSaving}
+                          className="px-6 h-11 rounded-xl bg-primary text-white text-sm font-bold shadow-lg shadow-primary/30 hover:bg-primary-dark transition-all disabled:opacity-60"
+                          type="button"
+                        >
+                          {profileSaving ? (localSettings.language === 'zh-CN' ? '保存中...' : 'Saving...') : t.profileSave}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-gray-100 dark:border-slate-800 pt-6 flex flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-black text-gray-900 dark:text-white">{t.passwordTitle}</p>
+                        {passwordNotice && (
+                          <span className="text-xs font-bold text-gray-600 dark:text-gray-300">{passwordNotice}</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="flex flex-col gap-2">
+                          <label className="text-sm font-semibold text-gray-900 dark:text-white">{t.currentPassword}</label>
+                          <input
+                            type="password"
+                            value={currentPassword}
+                            onChange={(e) => setCurrentPassword(e.target.value)}
+                            disabled={!token}
+                            className="rounded-xl border-gray-200 dark:border-slate-600 dark:bg-slate-800 dark:text-white h-12 px-4 disabled:opacity-60"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-sm font-semibold text-gray-900 dark:text-white">{t.newPassword}</label>
+                          <input
+                            type="password"
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            disabled={!token}
+                            className="rounded-xl border-gray-200 dark:border-slate-600 dark:bg-slate-800 dark:text-white h-12 px-4 disabled:opacity-60"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-sm font-semibold text-gray-900 dark:text-white">{t.confirmPassword}</label>
+                          <input
+                            type="password"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            disabled={!token}
+                            className="rounded-xl border-gray-200 dark:border-slate-600 dark:bg-slate-800 dark:text-white h-12 px-4 disabled:opacity-60"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={changePassword}
+                          disabled={!token || passwordSaving || !currentPassword || !newPassword || !confirmPassword}
+                          className="px-6 h-11 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-sm font-bold hover:opacity-90 transition-all disabled:opacity-60"
+                          type="button"
+                        >
+                          {passwordSaving ? (localSettings.language === 'zh-CN' ? '更新中...' : 'Updating...') : t.passwordSave}
+                        </button>
+                      </div>
+                    </div>
                 </div>
             </section>
        </div>

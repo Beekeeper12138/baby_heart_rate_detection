@@ -59,6 +59,33 @@ def test_register_login_me():
     me = client.get("/api/auth/me", headers=auth_header(token))
     assert me.status_code == 200
     assert me.json()["username"] == "alice"
+    assert "avatar_url" in me.json()
+
+def test_update_profile_and_change_password():
+    register_user("charlie", "password123", "Charlie")
+    token = login_user("charlie", "password123")
+
+    upd = client.put(
+        "/api/auth/me",
+        headers=auth_header(token),
+        json={"full_name": "New Nick", "avatar_url": "https://example.com/a.png"},
+    )
+    assert upd.status_code == 200
+    assert upd.json()["full_name"] == "New Nick"
+    assert upd.json()["avatar_url"] == "https://example.com/a.png"
+
+    pw = client.put(
+        "/api/auth/password",
+        headers=auth_header(token),
+        json={"current_password": "password123", "new_password": "password456"},
+    )
+    assert pw.status_code == 200
+    assert pw.json() == {"ok": True}
+
+    bad = client.post("/api/auth/token", data={"username": "charlie", "password": "password123"})
+    assert bad.status_code in (400, 401)
+    good = client.post("/api/auth/token", data={"username": "charlie", "password": "password456"})
+    assert good.status_code == 200
 
 def test_register_allows_chinese_username():
     r = register_user("张恒博", "password123", "ZHB")

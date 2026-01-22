@@ -2,7 +2,7 @@ const API_URL = "http://localhost:8000/api";
 const TOKEN_STORAGE_KEY = "infantmonitor_access_token";
 
 type TokenResponse = { access_token: string; token_type: string };
-type UserResponse = { id: number; username: string; full_name?: string | null; created_at: string };
+type UserResponse = { id: number; username: string; full_name?: string | null; avatar_url?: string | null; created_at: string };
 
 type ApiValidationError = {
   detail?: Array<{
@@ -12,6 +12,16 @@ type ApiValidationError = {
     ctx?: Record<string, unknown>;
     input?: unknown;
   }> | string;
+};
+
+const formatApiDetail = (raw: unknown, fallback: string) => {
+  const data = raw as ApiValidationError;
+  const detail = data?.detail;
+  if (!detail) return fallback;
+  if (typeof detail === 'string') return detail;
+  if (!Array.isArray(detail)) return fallback;
+  const messages = detail.map((e) => e.msg || fallback).filter(Boolean);
+  return Array.from(new Set(messages)).join('；') || fallback;
 };
 
 const formatRegisterError = (raw: unknown) => {
@@ -89,6 +99,58 @@ export const api = {
       throw new Error('Unauthorized');
     }
     if (!response.ok) throw new Error('Failed to fetch user');
+    return response.json();
+  },
+
+  updateProfile: async (
+    token: string,
+    payload: { username?: string; full_name?: string | null; avatar_url?: string | null },
+  ): Promise<UserResponse> => {
+    const response = await fetch(`${API_URL}/auth/me`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (response.status === 401) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      throw new Error('Unauthorized');
+    }
+    if (!response.ok) {
+      const data = await response.json().catch(async () => {
+        const text = await response.text().catch(() => '');
+        return { detail: text };
+      });
+      throw new Error(formatApiDetail(data, 'Failed to update profile'));
+    }
+    return response.json();
+  },
+
+  changePassword: async (
+    token: string,
+    payload: { current_password: string; new_password: string },
+  ): Promise<{ ok: boolean }> => {
+    const response = await fetch(`${API_URL}/auth/password`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (response.status === 401) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      throw new Error('Unauthorized');
+    }
+    if (!response.ok) {
+      const data = await response.json().catch(async () => {
+        const text = await response.text().catch(() => '');
+        return { detail: text };
+      });
+      throw new Error(formatApiDetail(data, 'Failed to change password'));
+    }
     return response.json();
   },
 

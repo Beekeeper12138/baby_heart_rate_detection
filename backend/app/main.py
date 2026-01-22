@@ -3,9 +3,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from .database import engine, Base
 from .api import auth, history, websocket_routes
 from .core.config import settings
+from sqlalchemy import text
 
-# Create tables
 Base.metadata.create_all(bind=engine)
+
+with engine.begin() as conn:
+    try:
+        rows = conn.execute(text("PRAGMA table_info(users)")).fetchall()
+        cols = {r[1] for r in rows}
+        if "avatar_url" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN avatar_url VARCHAR"))
+    except Exception:
+        pass
 
 if settings.create_default_admin:
     from sqlalchemy.orm import Session

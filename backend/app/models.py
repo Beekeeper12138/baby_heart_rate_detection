@@ -10,6 +10,7 @@ class User(Base):
     username = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     full_name = Column(String, nullable=True)
+    avatar_url = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     records = relationship("HistoryRecord", back_populates="user")
