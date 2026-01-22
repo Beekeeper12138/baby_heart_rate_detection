@@ -17,8 +17,23 @@ async def websocket_endpoint(websocket: WebSocket):
     
     try:
         while True:
-            # Receive frame (blob or bytes)
-            data = await websocket.receive_bytes()
+            msg = await websocket.receive()
+
+            if msg.get("type") == "websocket.receive" and msg.get("text"):
+                try:
+                    payload = json.loads(msg["text"])
+                    if isinstance(payload, dict) and payload.get("type") == "config":
+                        rppg_service.configure(
+                            sensitivity=payload.get("rPPGSensitivity"),
+                            motion_rejection=payload.get("motionRejection"),
+                        )
+                except Exception:
+                    pass
+                continue
+
+            data = msg.get("bytes")
+            if not data:
+                continue
             
             # Process in thread pool to avoid blocking the event loop
             result = await loop.run_in_executor(executor, rppg_service.process_frame, data)
@@ -35,4 +50,3 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close()
         except:
             pass
-

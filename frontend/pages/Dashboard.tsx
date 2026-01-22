@@ -185,6 +185,17 @@ const Dashboard: React.FC<DashboardProps> = ({ settings, token, onUpdateSettings
               return;
           }
           console.log("Connected to Backend");
+          try {
+            wsRef.current?.send(
+              JSON.stringify({
+                type: 'config',
+                rPPGSensitivity: settings.rPPGSensitivity,
+                motionRejection: settings.motionRejection,
+              }),
+            );
+          } catch {
+            undefined;
+          }
           // Start sending frames
           interval = setInterval(() => {
               if (videoRef.current && canvasRef.current && wsRef.current?.readyState === WebSocket.OPEN) {

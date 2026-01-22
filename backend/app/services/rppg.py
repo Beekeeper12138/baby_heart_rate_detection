@@ -22,12 +22,48 @@ class RPPGService:
         self._last_frame_ts = None
         self.bpm_history = [] 
         self.max_history_len = 5 
+        self.sensitivity = 75
+        self.motion_rejection = 40
         
         # Kalman Filter State
         self.kalman_x = 0.0 # Estimate
         self.kalman_p = 1.0 # Error covariance
         self.kalman_q = 0.0001 # Process noise covariance
         self.kalman_r = 0.1 # Measurement noise covariance
+
+    def configure(self, sensitivity=None, motion_rejection=None):
+        if sensitivity is not None:
+            try:
+                v = float(sensitivity)
+                v = max(0.0, min(100.0, v))
+                self.sensitivity = v
+            except Exception:
+                pass
+        if motion_rejection is not None:
+            try:
+                v = float(motion_rejection)
+                v = max(0.0, min(100.0, v))
+                self.motion_rejection = v
+            except Exception:
+                pass
+
+    def _required_snr(self):
+        s = float(self.sensitivity)
+        if s <= 75.0:
+            req = 8.0 + (75.0 - s) * (10.0 / 75.0)
+        else:
+            req = 8.0 - (s - 75.0) * (2.0 / 25.0)
+        req += float(self.motion_rejection) * 0.02
+        return float(max(4.0, min(25.0, req)))
+
+    def _min_seconds_needed(self):
+        s = float(self.sensitivity)
+        if s <= 75.0:
+            secs = 6.0 + (75.0 - s) * (2.0 / 75.0)
+        else:
+            secs = 6.0 - (s - 75.0) * (1.0 / 25.0)
+        secs += float(self.motion_rejection) * 0.02
+        return float(max(4.0, min(10.0, secs)))
 
     def skin_segmentation(self, roi):
         """
@@ -187,7 +223,7 @@ class RPPGService:
         snr = 0
         lighting = 0
         
-        if len(self.raw_red_buffer) > self.fps * 6:
+        if len(self.raw_red_buffer) > self.fps * self._min_seconds_needed():
             # POS Algorithm & Filtering
             pos_signal = self.calculate_pos_signal()
             self.signal_buffer = pos_signal.tolist() # Update signal buffer for legacy access if needed
@@ -195,7 +231,9 @@ class RPPGService:
             raw_bpm, snr = self.calculate_bpm_snr(pos_signal)
             
             # Adaptive Smoothing based on SNR
-            if snr > 8 and 40 < raw_bpm < 200:
+            history_len = int(max(3, min(10, round(3 + (self.motion_rejection / 100.0) * 7))))
+            self.max_history_len = history_len
+            if snr > self._required_snr() and 40 < raw_bpm < 200:
                 self.bpm_history.append(raw_bpm)
                 if len(self.bpm_history) > self.max_history_len:
                     self.bpm_history.pop(0)
@@ -221,7 +259,7 @@ class RPPGService:
             "resp_rate": round(resp_rate, 1),
             "snr": round(snr, 1), 
             "lighting": round(lighting, 1),
-            "quality": "Good" if snr > 20 else "Fair" if snr > 8 else "Poor",
+            "quality": "Good" if snr > max(20.0, self._required_snr() + 8.0) else "Fair" if snr > self._required_snr() else "Poor",
             "roi": main_roi
         }
 
@@ -278,8 +316,13 @@ class RPPGService:
         # Bandpass Filter (0.7 - 4.0 Hz)
         # Adaptive: if lighting is poor (check last lighting val), maybe narrow the band?
         # For now, stick to standard
-        b, a = signal.butter(2, [0.7, 4.0], btype='bandpass', fs=self.fps)
+        order = int(max(2, min(4, round(2 + (self.motion_rejection / 100.0) * 2))))
+        b, a = signal.butter(order, [0.7, 4.0], btype='bandpass', fs=self.fps)
         filtered = signal.filtfilt(b, a, detrended)
+        smooth_win = int(max(1, min(5, round(1 + (self.motion_rejection / 100.0) * 4))))
+        if smooth_win > 1:
+            kernel = np.ones(smooth_win, dtype=float) / float(smooth_win)
+            filtered = np.convolve(filtered, kernel, mode="same")
 
         # Kalman Filter Step (applied to the time-domain signal)
         # We re-initialize Kalman for each batch or keep state? 
@@ -307,7 +350,7 @@ class RPPGService:
         bpm = peak_freq * 60.0
 
         # SNR Calculation
-        bw = 0.2 # Increased bandwidth slightly
+        bw = float(0.18 + (100.0 - float(self.sensitivity)) * 0.0015)
         signal_mask = np.abs(band_freqs - peak_freq) <= bw
         signal_power = float(np.sum(band_power[signal_mask]))
         noise_power = float(np.sum(band_power[~signal_mask]))

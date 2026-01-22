@@ -7,10 +7,21 @@ interface SettingsProps {
   onSave: (newSettings: AppSettings) => void;
 }
 
+const RECOMMENDED_RPPG_SENSITIVITY = 75;
+const RECOMMENDED_MOTION_REJECTION = 40;
+
 const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
   const [localSettings, setLocalSettings] = React.useState<AppSettings>(settings);
   const [hasChanges, setHasChanges] = React.useState(false);
   const t = getTranslation(localSettings.language).settings;
+  const previewVideoRef = React.useRef<HTMLVideoElement>(null);
+  const previewStreamRef = React.useRef<MediaStream | null>(null);
+  const previewFpsRef = React.useRef<{ lastTs: number; count: number; lastEmit: number }>({ lastTs: 0, count: 0, lastEmit: 0 });
+  const previewRafRef = React.useRef<number | null>(null);
+  const [previewFps, setPreviewFps] = React.useState<number | null>(null);
+  const [previewError, setPreviewError] = React.useState<string | null>(null);
+  const [previewPlaying, setPreviewPlaying] = React.useState(false);
+  const [esp32PreviewUrl, setEsp32PreviewUrl] = React.useState<string>(localSettings.esp32Address);
 
   // Sync local state when external settings change (e.g. after save)
   useEffect(() => {
@@ -79,6 +90,105 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
     }
   }
 
+  useEffect(() => {
+    const stopLocalStream = () => {
+      if (previewRafRef.current !== null) {
+        window.cancelAnimationFrame(previewRafRef.current);
+        previewRafRef.current = null;
+      }
+      if (previewStreamRef.current) {
+        previewStreamRef.current.getTracks().forEach((t) => t.stop());
+        previewStreamRef.current = null;
+      }
+      if (previewVideoRef.current) {
+        previewVideoRef.current.srcObject = null;
+      }
+      setPreviewPlaying(false);
+      setPreviewFps(null);
+    };
+
+    setPreviewError(null);
+
+    if (localSettings.cameraSource === 'esp32') {
+      stopLocalStream();
+      setEsp32PreviewUrl(`${localSettings.esp32Address}${localSettings.esp32Address.includes('?') ? '&' : '?'}t=${Date.now()}`);
+      return;
+    }
+
+    const captureSize =
+      localSettings.resolution === '1080p'
+        ? { width: 1920, height: 1080 }
+        : localSettings.resolution === '720p'
+          ? { width: 1280, height: 720 }
+          : { width: 640, height: 480 };
+
+    let cancelled = false;
+    stopLocalStream();
+
+    const run = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: captureSize.width },
+            height: { ideal: captureSize.height },
+            frameRate: { ideal: 30 },
+          },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        previewStreamRef.current = stream;
+        const v = previewVideoRef.current;
+        if (!v) return;
+        v.srcObject = stream;
+        await v.play();
+        setPreviewPlaying(true);
+
+        const tick = (ts: number) => {
+          const s = previewFpsRef.current;
+          if (!s.lastTs) s.lastTs = ts;
+          s.count += 1;
+          const dt = ts - s.lastEmit;
+          if (dt >= 700) {
+            const elapsed = ts - s.lastTs;
+            const fps = elapsed > 0 ? (s.count * 1000) / elapsed : 0;
+            setPreviewFps(Math.round(fps * 10) / 10);
+            s.lastTs = ts;
+            s.count = 0;
+            s.lastEmit = ts;
+          }
+          previewRafRef.current = window.requestAnimationFrame(tick);
+        };
+        previewFpsRef.current = { lastTs: 0, count: 0, lastEmit: 0 };
+        previewRafRef.current = window.requestAnimationFrame(tick);
+      } catch (e: any) {
+        const msg = e?.name === 'NotAllowedError'
+          ? (localSettings.language === 'zh-CN' ? '未授予摄像头权限' : 'Camera permission denied')
+          : (localSettings.language === 'zh-CN' ? '无法打开摄像头' : 'Failed to open camera');
+        setPreviewError(msg);
+        setPreviewPlaying(false);
+        setPreviewFps(null);
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+      stopLocalStream();
+    };
+  }, [localSettings.cameraSource, localSettings.esp32Address, localSettings.resolution, localSettings.language]);
+
+  const signalStrength = React.useMemo(() => {
+    if (localSettings.cameraSource === 'esp32') return previewError ? 0 : 80;
+    if (!previewPlaying) return 0;
+    const fps = previewFps ?? 0;
+    const pct = Math.round(Math.min(100, Math.max(0, (fps / 30) * 100)));
+    return Math.max(30, pct);
+  }, [localSettings.cameraSource, previewError, previewPlaying, previewFps]);
+
   return (
     <div className="flex flex-col md:flex-row gap-8 p-4 md:p-8 md:px-10 lg:px-20 max-w-[1440px] mx-auto pb-32">
        {/* Sidebar Navigation */}
@@ -114,19 +224,50 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">{t.preview}</p>
                 <div className="relative aspect-video rounded-lg overflow-hidden bg-black mb-3">
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-2 z-10">
-                        <span className="text-[10px] text-white font-mono uppercase">{t.online} | 30FPS</span>
+                        <span className="text-[10px] text-white font-mono uppercase">
+                          {previewPlaying ? t.online : (localSettings.language === 'zh-CN' ? '连接中' : 'CONNECTING')}
+                          {previewFps ? ` | ${Math.round(previewFps)}FPS` : ''}
+                        </span>
                     </div>
-                     <div className="w-full h-full bg-gray-800 flex items-center justify-center">
-                         <span className="material-symbols-outlined text-gray-600 text-4xl">videocam</span>
-                    </div>
+                    {localSettings.cameraSource === 'local' ? (
+                      <video
+                        ref={previewVideoRef}
+                        className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
+                        muted
+                        playsInline
+                        autoPlay
+                      />
+                    ) : (
+                      <img
+                        src={esp32PreviewUrl}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onLoad={() => {
+                          setPreviewError(null);
+                          setPreviewPlaying(true);
+                        }}
+                        onError={() => {
+                          setPreviewError(localSettings.language === 'zh-CN' ? '流地址不可用' : 'Stream unavailable');
+                          setPreviewPlaying(false);
+                        }}
+                        alt="preview"
+                      />
+                    )}
+                    {!previewPlaying && (
+                      <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="material-symbols-outlined text-gray-600 text-4xl">videocam</span>
+                          {previewError && <span className="text-[10px] text-gray-300">{previewError}</span>}
+                        </div>
+                      </div>
+                    )}
                 </div>
                  <div className="flex flex-col gap-1">
                     <div className="flex justify-between text-[10px] font-bold">
                         <span className="text-gray-500">{t.signalStrength}</span>
-                        <span className="text-green-500">92%</span>
+                        <span className={`${signalStrength >= 70 ? 'text-green-500' : signalStrength >= 40 ? 'text-yellow-500' : 'text-red-500'}`}>{signalStrength}%</span>
                     </div>
                     <div className="w-full h-1 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-green-500" style={{ width: '92%' }}></div>
+                        <div className={`h-full ${signalStrength >= 70 ? 'bg-green-500' : signalStrength >= 40 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${signalStrength}%` }}></div>
                     </div>
                 </div>
             </div>
@@ -222,6 +363,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                         value={localSettings.rPPGSensitivity}
                         onChange={(v) => handleChange('rPPGSensitivity', v)}
                         badge="中等偏高"
+                        recommendedText={localSettings.language === 'zh-CN' ? `推荐：${RECOMMENDED_RPPG_SENSITIVITY}` : `Recommended: ${RECOMMENDED_RPPG_SENSITIVITY}`}
                      />
                      <RangeControl 
                         label={t.motion}
@@ -229,6 +371,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                         value={localSettings.motionRejection}
                         onChange={(v) => handleChange('motionRejection', v)}
                         badge="标准"
+                        recommendedText={localSettings.language === 'zh-CN' ? `推荐：${RECOMMENDED_MOTION_REJECTION}` : `Recommended: ${RECOMMENDED_MOTION_REJECTION}`}
                      />
                      <div className="grid grid-cols-2 gap-6">
                         <div className="flex flex-col gap-2">
@@ -338,14 +481,24 @@ const SourceCard: React.FC<{ active: boolean; onClick: () => void; icon: string;
     </button>
 );
 
-const RangeControl: React.FC<{ label: string; desc: string; value: number; onChange: (val: number) => void; badge: string }> = ({ label, desc, value, onChange, badge }) => (
+const RangeControl: React.FC<{ label: string; desc: string; value: number; onChange: (val: number) => void; badge: string; recommendedText?: string }> = ({ label, desc, value, onChange, badge, recommendedText }) => (
     <div className="flex flex-col gap-4">
         <div className="flex justify-between items-center">
             <div className="flex flex-col">
                 <p className="text-sm font-semibold text-gray-900 dark:text-white">{label}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400">{desc}</p>
             </div>
-            <span className="px-3 py-1 bg-primary/10 text-primary text-xs font-bold rounded-lg uppercase">{badge}</span>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white text-xs font-black rounded-lg tabular-nums">
+                {value}
+              </span>
+              {recommendedText && (
+                <span className="px-3 py-1 bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 text-xs font-bold rounded-lg">
+                  {recommendedText}
+                </span>
+              )}
+              <span className="px-3 py-1 bg-primary/10 text-primary text-xs font-bold rounded-lg uppercase">{badge}</span>
+            </div>
         </div>
         <input 
             type="range" 
